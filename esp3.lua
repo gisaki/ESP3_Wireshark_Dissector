@@ -2,6 +2,7 @@
 -- Wireshark Plugin for EnOcean sensor data packet
 -- 
 -- EnOcean Serial Protocol 3 (ESP3)
+-- Packet Type 1: RADIO_ERP1
 -- Packet Type 10: RADIO_ERP2
 -- 
 
@@ -45,6 +46,8 @@ ESP3_NOT_FOUND = 0
 ESP3_TYPE1 = 1
 ESP3_TYPE10 = 10
 
+YOUR_EXTRA_HEADER_SIZE = 0
+
 -- create a function to "postdissect" each frame
 function esp3_proto.dissector(buf, pinfo, tree)
     -- obtain the current values the protocol fields
@@ -54,6 +57,10 @@ function esp3_proto.dissector(buf, pinfo, tree)
     local udp_dst = udp_dst_f()
     
     -- start position of analysis (ignore Ethernet frame, IP frame and TCP/UDP header)
+    -- If ESP3 data starts at the beginning of UDP / TCP data, 
+    -- parsing is started after the UDP / TCP header.
+    -- Or, if there are some extra header data in addition to the original ESP3 data, 
+    -- the parsing needs to skip the extra header size.
     local ip_header_length = (buf(14,1):uint() - 0x40) * 4
     local skip_len
     if tcp_src then
@@ -62,6 +69,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
     if udp_src then
        skip_len = 14 + ip_header_length + 8 -- eth, ip, udp(header)
     end
+    skip_len = skip_len + YOUR_EXTRA_HEADER_SIZE
     
     -- check if the packet is a target
     local subtree
