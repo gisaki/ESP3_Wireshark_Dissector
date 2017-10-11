@@ -42,6 +42,7 @@ esp3_proto.fields = {
 }
 
 ESP3_NOT_FOUND = 0
+ESP3_TYPE1 = 1
 ESP3_TYPE10 = 10
 
 -- create a function to "postdissect" each frame
@@ -68,19 +69,32 @@ function esp3_proto.dissector(buf, pinfo, tree)
     if tcp_src or udp_src then
         local sync_byte = buf(skip_len+0, 1):uint()
         local data_length = buf(skip_len+1, 2):uint()
+        local optional_length = buf(skip_len+3, 1):uint()
         local packet_type = buf(skip_len+4, 1):uint()
         
+        if sync_byte == 0x55 and packet_type == 0x01 then
+            esp3_proto_type = ESP3_TYPE1
+            subtree = tree:add(esp3_proto, "EnOcean Serial Protocol 3 (ESP3)")
+                :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1: RADIO_ERP1, ver.0.1")
+        end
         if sync_byte == 0x55 and packet_type == 0x0A then
             esp3_proto_type = ESP3_TYPE10
             subtree = tree:add(esp3_proto, "EnOcean Serial Protocol 3 (ESP3)")
                 :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10: RADIO_ERP2, ver.0.1")
         end
 
+        -- ESP3 Type1 ?
+        if esp3_proto_type == ESP3_TYPE1 then
+            local subtree_add
+            local pos = 0
+            subtree_add, pos = wrap_tree_add_str(subtree, buf(skip_len, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1", 0, data_length+7+optional_length)
+            decode_esp3_type1(subtree_add, buf(skip_len, buf:len()-skip_len), pinfo, tree)
+        end
         -- ESP3 Type10 ?
         if esp3_proto_type == ESP3_TYPE10 then
             local subtree_add
             local pos = 0
-            subtree_add, pos = wrap_tree_add_str(subtree, buf(skip_len, data_length+9), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10", 0, data_length+9)
+            subtree_add, pos = wrap_tree_add_str(subtree, buf(skip_len, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10", 0, data_length+7+optional_length)
             decode_esp3_type10(subtree_add, buf(skip_len, buf:len()-skip_len), pinfo, tree)
         end
     end
@@ -88,6 +102,72 @@ function esp3_proto.dissector(buf, pinfo, tree)
     ------------------------------------
     -- build trees
     ------------------------------------
+
+    -- ESP3 Type1
+    function decode_esp3_type1(subtree, buf, pinfo, tree)
+        local sync_byte = buf(0, 1):uint()
+        local data_length = buf(1, 2):uint()
+        local optional_length = buf(3, 1):uint()
+        local packet_type = buf(4, 1):uint()
+        if sync_byte == 0x55 and packet_type == 0x01 then
+            
+            local subtree_add
+            local pos = 0
+            local tmp
+            
+            -- header
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Sync. Byte", pos, 1);
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Data Length", pos, 2);
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Optional Length", pos, 1);
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Packet Type", pos, 1);
+            
+            -- CRC
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "CRC8H", pos, 1);
+            
+            -- data
+            if data_length > 0 then
+                subtree_add, tmp = wrap_tree_add_str(subtree, buf, "ERP1 radio telegram (Raw data)", pos, data_length);
+                decode_erp1_radio(subtree_add, buf(pos, data_length), pinfo, tree)
+                pos = tmp
+            else
+                wrap_tree_add_empty(subtree, "(no ERP1 radio telegram)");
+            end
+            
+            -- Optional Data
+            if optional_length > 0 then
+                subtree_add, pos = wrap_tree_add_uint(subtree, buf, "SubTelNum", pos, 1);
+                subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Destination ID", pos, 4);
+                subtree_add, pos = wrap_tree_add_uint(subtree, buf, "dBm", pos, 1);
+                subtree_add, pos = wrap_tree_add_uint(subtree, buf, "SecurityLevel", pos, 1);
+            else
+                wrap_tree_add_empty(subtree, "(no Optional Data)");
+            end
+            
+            -- CRC
+            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "CRC8D", pos, 1);
+
+        end
+    end
+
+    -- ERP2 radio protocol (Data contents for Length > 6 Bytes)
+    function decode_erp1_radio(subtree, buf, pinfo, tree)
+        local subtree_add
+        local pos = 0
+        local tmp
+        
+        -- RORG
+        subtree_add, pos = wrap_tree_add_uint(subtree, buf, "RORG", pos, 1);
+        
+        -- DATA
+        subtree_add, pos = wrap_tree_add_uint(subtree, buf, "DATA", pos, buf:len()-pos-5);
+        
+        -- TXID
+        subtree_add, pos = wrap_tree_add_uint(subtree, buf, "TXID", pos, 4);
+        
+        -- STATUS
+        subtree_add, pos = wrap_tree_add_uint(subtree, buf, "STATUS", pos, 1);
+        
+    end
 
     -- ESP3 Type10
     function decode_esp3_type10(subtree, buf, pinfo, tree)
@@ -111,7 +191,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
             
             -- data
             subtree_add, tmp = wrap_tree_add_str(subtree, buf, "ERP2 radio protocol telegram (Raw data)", pos, data_length);
-            decode_esp2_radio_6(subtree_add, buf(pos, data_length), pinfo, tree)
+            decode_erp2_radio_6(subtree_add, buf(pos, data_length), pinfo, tree)
             pos = tmp
             
             -- Optional Data
@@ -125,7 +205,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
     end
 
     -- ERP2 radio protocol (Data contents for Length > 6 Bytes)
-    function decode_esp2_radio_6(subtree, buf, pinfo, tree)
+    function decode_erp2_radio_6(subtree, buf, pinfo, tree)
         local header = buf(0, 1):uint()
         local opt_data_len = 0
         local subtree_add
@@ -202,7 +282,6 @@ function esp3_proto.dissector(buf, pinfo, tree)
         end
 
         -- CRC
-        -- TBD
         subtree_add, pos = wrap_tree_add_uint(subtree, buf, "CRC", pos, 1);
 
     end
