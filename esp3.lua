@@ -18,33 +18,29 @@ udp_dst_f = Field.new("udp.dstport")
 esp3_proto = Proto("esp3","EnOcean Serial Protocol 3 (ESP3)")
 
 -- create the fields for our "protocol"
-decoded_F = ProtoField.string("en.decoded", "EnOcean sensor packet") 
+F_esp3_decoded = ProtoField.string("esp3.decoded", "EnOcean sensor packet") 
 
 -- for bit field
-    F_flag_size1_bit_0123 = ProtoField.uint8("esp3.flag_bit","b0123", base.HEX, None, 0x0F)
-    F_flag_size1_bit_4567 = ProtoField.uint8("og.flag_bit","b4567", base.HEX, None, 0xF0)
-    F_flag_size1_bit0 = ProtoField.uint8("esp3.flag_bit","b0", base.HEX, None, 0x01)
-    F_flag_size1_bit1 = ProtoField.uint8("esp3.flag_bit","b1", base.HEX, None, 0x02)
-    F_flag_size1_bit2 = ProtoField.uint8("esp3.flag_bit","b2", base.HEX, None, 0x04)
-    F_flag_size1_bit3 = ProtoField.uint8("esp3.flag_bit","b3", base.HEX, None, 0x08)
-    F_flag_size1_bit4 = ProtoField.uint8("esp3.flag_bit","b4", base.HEX, None, 0x10)
-    F_flag_size1_bit5 = ProtoField.uint8("esp3.flag_bit","b5", base.HEX, None, 0x20)
-    F_flag_size1_bit6 = ProtoField.uint8("esp3.flag_bit","b6", base.HEX, None, 0x40)
-    F_flag_size1_bit7 = ProtoField.uint8("esp3.flag_bit","b7", base.HEX, None, 0x80)
+F_esp3_flag_size1_bit_0123 = ProtoField.uint8("esp3.flag_bit","b0123", base.HEX, None, 0x0F)
+F_esp3_flag_size1_bit_4567 = ProtoField.uint8("esp3.flag_bit","b4567", base.HEX, None, 0xF0)
+F_esp3_flag_size1_bit0 = ProtoField.uint8("esp3.flag_bit","b0", base.HEX, None, 0x01)
+F_esp3_flag_size1_bit1 = ProtoField.uint8("esp3.flag_bit","b1", base.HEX, None, 0x02)
+F_esp3_flag_size1_bit2 = ProtoField.uint8("esp3.flag_bit","b2", base.HEX, None, 0x04)
+F_esp3_flag_size1_bit3 = ProtoField.uint8("esp3.flag_bit","b3", base.HEX, None, 0x08)
+F_esp3_flag_size1_bit4 = ProtoField.uint8("esp3.flag_bit","b4", base.HEX, None, 0x10)
+F_esp3_flag_size1_bit5 = ProtoField.uint8("esp3.flag_bit","b5", base.HEX, None, 0x20)
+F_esp3_flag_size1_bit6 = ProtoField.uint8("esp3.flag_bit","b6", base.HEX, None, 0x40)
+F_esp3_flag_size1_bit7 = ProtoField.uint8("esp3.flag_bit","b7", base.HEX, None, 0x80)
 
-    F_flag_size1_bit_567 = ProtoField.uint8("esp3.flag_bit","b567", base.HEX, None, 0xE0)
+F_esp3_flag_size1_bit_567 = ProtoField.uint8("esp3.flag_bit","b567", base.HEX, None, 0xE0)
 
 -- add the field to the protocol
 esp3_proto.fields = {
-    decoded_F, 
-    F_flag_size1_bit_0123, F_flag_size1_bit_4567, 
-    F_flag_size1_bit0, F_flag_size1_bit1, F_flag_size1_bit2, F_flag_size1_bit3, F_flag_size1_bit4, F_flag_size1_bit5, F_flag_size1_bit6, F_flag_size1_bit7, 
-    F_flag_size1_bit_567
+    F_esp3_decoded, 
+    F_esp3_flag_size1_bit_0123, F_esp3_flag_size1_bit_4567, 
+    F_esp3_flag_size1_bit0, F_esp3_flag_size1_bit1, F_esp3_flag_size1_bit2, F_esp3_flag_size1_bit3, F_esp3_flag_size1_bit4, F_esp3_flag_size1_bit5, F_esp3_flag_size1_bit6, F_esp3_flag_size1_bit7, 
+    F_esp3_flag_size1_bit_567
 }
-
-ESP3_NOT_FOUND = 0
-ESP3_TYPE1 = 1
-ESP3_TYPE10 = 10
 
 YOUR_EXTRA_HEADER_SIZE = 0
 
@@ -62,54 +58,70 @@ function esp3_proto.dissector(buf, pinfo, tree)
     -- Or, if there are some extra header data in addition to the original ESP3 data, 
     -- the parsing needs to skip the extra header size.
     local ip_header_length = (buf(14,1):uint() - 0x40) * 4
-    local skip_len
+    local skip_len = 0
     if tcp_src then
        skip_len = 14 + ip_header_length + 20 -- eth, ip, tcp(header)
     end
     if udp_src then
        skip_len = 14 + ip_header_length + 8 -- eth, ip, udp(header)
     end
-    skip_len = skip_len + YOUR_EXTRA_HEADER_SIZE
-    
-    -- check if the packet is a target
-    local subtree
-    local esp3_proto_type = ESP3_NOT_FOUND
-    if tcp_src or udp_src then
-        local sync_byte = buf(skip_len+0, 1):uint()
-        local data_length = buf(skip_len+1, 2):uint()
-        local optional_length = buf(skip_len+3, 1):uint()
-        local packet_type = buf(skip_len+4, 1):uint()
-        
-        if sync_byte == 0x55 and packet_type == 0x01 then
-            esp3_proto_type = ESP3_TYPE1
-            subtree = tree:add(esp3_proto, "EnOcean Serial Protocol 3 (ESP3)")
-                :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1: RADIO_ERP1, ver.0.1")
-        end
-        if sync_byte == 0x55 and packet_type == 0x0A then
-            esp3_proto_type = ESP3_TYPE10
-            subtree = tree:add(esp3_proto, "EnOcean Serial Protocol 3 (ESP3)")
-                :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10: RADIO_ERP2, ver.0.1")
-        end
 
-        -- ESP3 Type1 ?
-        if esp3_proto_type == ESP3_TYPE1 then
-            local subtree_add
-            local pos = 0
-            subtree_add, pos = wrap_tree_add_str(subtree, buf(skip_len, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1", 0, data_length+7+optional_length)
-            decode_esp3_type1(subtree_add, buf(skip_len, buf:len()-skip_len), pinfo, tree)
-        end
-        -- ESP3 Type10 ?
-        if esp3_proto_type == ESP3_TYPE10 then
-            local subtree_add
-            local pos = 0
-            subtree_add, pos = wrap_tree_add_str(subtree, buf(skip_len, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10", 0, data_length+7+optional_length)
-            decode_esp3_type10(subtree_add, buf(skip_len, buf:len()-skip_len), pinfo, tree)
+    -- check if the packet is a target
+    if tcp_src or udp_src then
+        analyze_esp3(esp3_proto, buf, skip_len + YOUR_EXTRA_HEADER_SIZE, pinfo, tree)
+    end
+
+    ------------------------------------
+    -- analyze
+    ------------------------------------
+
+    function analyze_esp3(field, buf, offcet, pinfo, tree)
+        if buf:len() > offcet then
+            decode_esp3(field, buf(offcet, buf:len()-offcet), pinfo, tree)
         end
     end
 
     ------------------------------------
     -- build trees
     ------------------------------------
+
+    function decode_esp3(field, buf, pinfo, tree)
+        -- never match when the packet size is too small
+        if buf:len() < 4 then
+            return
+        end
+
+        local subtree
+
+        local sync_byte = buf(0, 1):uint()
+        local data_length = buf(1, 2):uint()
+        local optional_length = buf(3, 1):uint()
+        local packet_type = buf(4, 1):uint()
+        
+        if sync_byte == 0x55 and packet_type == 0x01 then
+            subtree = tree:add(field, "EnOcean Serial Protocol 3 (ESP3)")
+                :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1: RADIO_ERP1, ver.0.1")
+        end
+        if sync_byte == 0x55 and packet_type == 0x0A then
+            subtree = tree:add(field, "EnOcean Serial Protocol 3 (ESP3)")
+                :add_expert_info(PI_DEBUG, PI_NOTE, "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10: RADIO_ERP2, ver.0.1")
+        end
+
+        -- ESP3 Type1 ?
+        if sync_byte == 0x55 and packet_type == 0x01 then
+            local subtree_add
+            local pos = 0
+            subtree_add, pos = wrap_tree_add_str(subtree, buf(0, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 1", 0, data_length+7+optional_length)
+            decode_esp3_type1(subtree_add, buf, pinfo, tree)
+        end
+        -- ESP3 Type10 ?
+        if sync_byte == 0x55 and packet_type == 0x0A then
+            local subtree_add
+            local pos = 0
+            subtree_add, pos = wrap_tree_add_str(subtree, buf(0, data_length+7+optional_length), "EnOcean Serial Protocol 3 (ESP3) - Packet Type 10", 0, data_length+7+optional_length)
+            decode_esp3_type10(subtree_add, buf, pinfo, tree)
+        end
+    end
 
     -- ESP3 Type1
     function decode_esp3_type1(subtree, buf, pinfo, tree)
@@ -223,16 +235,16 @@ function esp3_proto.dissector(buf, pinfo, tree)
         
         -- header
         subtree_add, tmp = wrap_tree_add_uint(subtree, buf, "Header", pos, 1);
-        subtree_bit = wrap_tree_add_bit(F_flag_size1_bit_567, subtree_add, buf, ": Address Control", pos, 1)
-        subtree_bit = wrap_tree_add_bit(F_flag_size1_bit4, subtree_add, buf, ": Extended header availablel", pos, 1)
-        subtree_bit = wrap_tree_add_bit(F_flag_size1_bit_0123, subtree_add, buf, ": Telegram type (R-ORG)", pos, 1)
+        subtree_bit = wrap_tree_add_bit(F_esp3_flag_size1_bit_567, subtree_add, buf, ": Address Control", pos, 1)
+        subtree_bit = wrap_tree_add_bit(F_esp3_flag_size1_bit4, subtree_add, buf, ": Extended header availablel", pos, 1)
+        subtree_bit = wrap_tree_add_bit(F_esp3_flag_size1_bit_0123, subtree_add, buf, ": Telegram type (R-ORG)", pos, 1)
         pos = tmp
         
         -- Extended Header
         if bit32.band(header, 0x10) == 0x10 then
             subtree_add, tmp = wrap_tree_add_uint(subtree, buf, "Extended Header", pos, 1);
-            subtree_bit, tmp = wrap_tree_add_bit(F_flag_size1_bit_4567, subtree_add, buf, ": Repeater count", pos, 1)
-            subtree_bit, tmp = wrap_tree_add_bit(F_flag_size1_bit_0123, subtree_add, buf, ": Length of Optional data", pos, 1)
+            subtree_bit, tmp = wrap_tree_add_bit(F_esp3_flag_size1_bit_4567, subtree_add, buf, ": Repeater count", pos, 1)
+            subtree_bit, tmp = wrap_tree_add_bit(F_esp3_flag_size1_bit_0123, subtree_add, buf, ": Length of Optional data", pos, 1)
             opt_data_len = bit32.band(buf(pos, 1):uint(), 0x0F)
             pos = tmp
         else
@@ -262,7 +274,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
             subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Destination-ID 32 bit", pos, 4);
         elseif bit32.band(header, 0xE0) == 0x60 then
             -- 011: Originator-ID 48 bit, no Destination-ID
-            subtree_add, pos = wrap_tree_add_uint(subtree, buf, "Originator-ID 48 bit", pos, 6);
+            subtree_add, pos = wrap_tree_add_str(subtree, buf, "Originator-ID 48 bit", pos, 6);
             wrap_tree_add_empty(subtree, "(no Destination-ID)");
         end
 
@@ -285,6 +297,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
 
         -- Optional Data
         if opt_data_len > 0 then
+            -- TBD
         else
             wrap_tree_add_empty(subtree, "(no Optional Data)");
         end
@@ -304,7 +317,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
     end
 
     function wrap_tree_add_empty(tree, title)
-        tree:add(decoded_F):set_text(title)
+        tree:add(F_esp3_decoded):set_text(title)
     end
     
     function wrap_tree_add_uint(tree, buf, title, pos, len)
@@ -318,7 +331,7 @@ function esp3_proto.dissector(buf, pinfo, tree)
 
     function wrap_tree_add_com(tree, buf, title, pos, len, decoded)
         local text = string.format("%s: 0x%s (%s)", title, tostring(buf), decoded)
-        local subtree_add = tree:add(decoded_F, buf):set_text(text)
+        local subtree_add = tree:add(F_esp3_decoded, buf):set_text(text)
         return subtree_add, (pos + len)
     end
 
